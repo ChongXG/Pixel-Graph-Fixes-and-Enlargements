@@ -1,283 +1,315 @@
 import sys
+import os
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-                             QLabel, QPushButton, QSlider, QFileDialog, QMessageBox)
+                            QLabel, QSlider, QPushButton, QFileDialog, QSizePolicy, QFrame)
+from PyQt5.QtCore import Qt, QSize
 from PyQt5.QtGui import QPixmap, QImage
-from PyQt5.QtCore import Qt
 from PIL import Image
-import numpy as np
 
-class ImageProcessorApp(QMainWindow):
+class ImageResizerApp(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("图片分辨率调节工具")
-        self.setGeometry(100, 100, 1200, 800)
+        self.setWindowTitle("像素风图片修复工具")
+        self.setGeometry(100, 100, 600, 500)
+        
+        # 初始化UI
+        self.initUI()
         
         # 初始化变量
         self.original_image = None
-        self.processed_image = None
-        self.current_resolution = 64  # 默认分辨率
+        self.modified_image = None
+        self.image_path = ""
         
-        # 创建主控件和布局
-        self.main_widget = QWidget()
-        self.setCentralWidget(self.main_widget)
-        self.main_layout = QVBoxLayout()
-        self.main_widget.setLayout(self.main_layout)
+    def initUI(self):
+        # 主窗口部件
+        main_widget = QWidget()
+        self.setCentralWidget(main_widget)
+        main_layout = QVBoxLayout()
+        main_widget.setLayout(main_layout)
         
-        # 创建顶部控制区域
-        self.create_controls()
+        # 第一行：图片预览框
+        preview_layout = QHBoxLayout()
         
-        # 创建图片显示区域
-        self.create_image_display()
+        # 原图预览框
+        self.original_preview = QLabel()
+        self.original_preview.setAlignment(Qt.AlignCenter)
+        self.original_preview.setStyleSheet("""
+            border: 2px solid #3498db; 
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        """)
+        self.original_preview.setText("原图预览")
+        self.original_preview.setMinimumSize(300, 300)
+        self.original_preview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
-        # 创建信息标签
-        self.create_info_labels()
+        # 处理后预览框
+        self.modified_preview = QLabel()
+        self.modified_preview.setAlignment(Qt.AlignCenter)
+        self.modified_preview.setStyleSheet("""
+            border: 2px solid #e74c3c; 
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        """)
+        self.modified_preview.setText("处理后预览")
+        self.modified_preview.setMinimumSize(300, 300)
+        self.modified_preview.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
-        # 初始化UI状态
-        self.update_ui_state()
-    
-    def create_controls(self):
-        """创建控制按钮和滑块"""
-        control_layout = QHBoxLayout()
+        preview_layout.addWidget(self.original_preview)
+        preview_layout.addWidget(self.modified_preview)
+        main_layout.addLayout(preview_layout, stretch=1)
+        
+        # 控制面板区域
+        control_panel = QWidget()
+        control_panel.setStyleSheet("""
+            background-color: #ecf0f1; 
+            padding: 10px;
+            border-radius: 5px;
+        """)
+        control_layout = QVBoxLayout(control_panel)
+        
+        # 宽度调节条 (8-256)
+        width_control = QWidget()
+        width_layout = QHBoxLayout(width_control)
+        
+        width_label = QLabel("缩小宽度 (8-256):")
+        width_label.setFixedWidth(120)
+        
+        
+        self.width_slider = QSlider(Qt.Horizontal)
+        self.width_slider.setRange(8, 256)
+        self.width_slider.setValue(128)
+        self.width_slider.valueChanged.connect(self.update_image)
+        self.width_slider.setStyleSheet("""
+            QSlider {
+                min-height: 25px;  /* 滑块轨道最小高度 */
+            }
+            /* 滑槽样式 */
+            QSlider::groove:horizontal {
+                height: 10px;       /* 滑槽高度 */
+                background: #d3d3d3; /* 默认滑槽颜色 */
+            }
+            /* 滑块手柄样式 */
+            QSlider::handle:horizontal {
+                width: 15px;       /* 手柄宽度 */
+                height: 10px;      /* 手柄高度 */
+                margin: -5px 0;    /* 垂直居中 */
+                background: white;
+                border: 2px solid #3498db; /* 蓝色边框 */
+                border-radius: 8px; /* 圆形手柄 */
+            }
+            /* 手柄悬停效果 */
+            QSlider::handle:horizontal:hover {
+                background: #f0f0f0;
+                border: 2px solid #2980b9; /* 深蓝色 */
+            }
+        """)
+        
+        self.width_value = QLabel(str(self.width_slider.value()))
+        self.width_value.setFixedWidth(40)
+        self.width_slider.valueChanged.connect(lambda v: self.width_value.setText(str(v)))
+        
+        width_layout.addWidget(width_label)
+        width_layout.addWidget(self.width_slider)
+        width_layout.addWidget(self.width_value)
+        
+        control_layout.addWidget(width_control)
+        
+        # 信息显示区域
+        info_panel = QWidget()
+        info_layout = QVBoxLayout(info_panel)
+        info_layout.setContentsMargins(0, 0, 0, 10)
+        
+        self.original_res_label = QLabel("原图分辨率: 未导入")
+        self.original_res_label.setStyleSheet("""
+            color: #2980b9; 
+            font-weight: bold;
+            padding: 2px;
+        """)
+        
+        self.process_info_label = QLabel("处理流程: 未开始")
+        self.process_info_label.setStyleSheet("""
+            color: #f39c12; 
+            font-weight: bold;
+            padding: 2px;
+        """)
+        
+        info_layout.addWidget(self.original_res_label)
+        info_layout.addWidget(self.process_info_label)
+        
+        control_layout.addWidget(info_panel)
+        
+        # 按钮区域（水平排列）
+        button_panel = QWidget()
+        button_layout = QHBoxLayout(button_panel)
+        button_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 按钮统一样式
+        button_style = """
+            QPushButton {
+                padding: 8px 15px;
+                min-width: 80px;
+                border: 1px solid #bdc3c7;
+                border-radius: 4px;
+                background-color: #f8f9fa;
+                color: #2c3e50;
+            }
+            QPushButton:hover {
+                background-color: #e9ecef;
+                border-color: #95a5a6;
+            }
+            QPushButton:pressed {
+                background-color: #dee2e6;
+            }
+            QPushButton:disabled {
+                background-color: #e9ecef;
+                color: #95a5a6;
+            }
+        """
         
         # 导入按钮
         self.import_btn = QPushButton("导入图片")
+        self.import_btn.setStyleSheet(button_style + """
+            background-color: #3498db;
+            color: white;
+        """)
         self.import_btn.clicked.connect(self.import_image)
-        control_layout.addWidget(self.import_btn)
         
-        # 导出按钮
-        self.export_btn = QPushButton("导出图片")
-        self.export_btn.clicked.connect(self.export_image)
-        control_layout.addWidget(self.export_btn)
+        # 四个导出按钮
+        self.export_btn_1080 = QPushButton("导出 1080px")
+        self.export_btn_1080.setStyleSheet(button_style)
+        self.export_btn_1080.clicked.connect(lambda: self.export_image(1080))
+        self.export_btn_1080.setEnabled(False)
         
-        # 分辨率滑块
-        resolution_layout = QHBoxLayout()
-        resolution_layout.addWidget(QLabel("目标分辨率:"))
+        self.export_btn_2160 = QPushButton("导出 2160px")
+        self.export_btn_2160.setStyleSheet(button_style)
+        self.export_btn_2160.clicked.connect(lambda: self.export_image(2160))
+        self.export_btn_2160.setEnabled(False)
         
-        self.resolution_slider = QSlider(Qt.Horizontal)
-        self.resolution_slider.setMinimum(32)
-        self.resolution_slider.setMaximum(128)
-        self.resolution_slider.setValue(64)
-        self.resolution_slider.setTickInterval(16)
-        self.resolution_slider.setTickPosition(QSlider.TicksBelow)
-        self.resolution_slider.valueChanged.connect(self.update_resolution)
-        resolution_layout.addWidget(self.resolution_slider)
+        self.export_btn_3240 = QPushButton("导出 3240px")
+        self.export_btn_3240.setStyleSheet(button_style)
+        self.export_btn_3240.clicked.connect(lambda: self.export_image(3240))
+        self.export_btn_3240.setEnabled(False)
         
-        self.resolution_label = QLabel("64")
-        resolution_layout.addWidget(self.resolution_label)
+        self.export_btn_4320 = QPushButton("导出 4320px")
+        self.export_btn_4320.setStyleSheet(button_style)
+        self.export_btn_4320.clicked.connect(lambda: self.export_image(4320))
+        self.export_btn_4320.setEnabled(False)
         
-        control_layout.addLayout(resolution_layout)
+        button_layout.addWidget(self.import_btn)
+        button_layout.addWidget(self.export_btn_1080)
+        button_layout.addWidget(self.export_btn_2160)
+        button_layout.addWidget(self.export_btn_3240)
+        button_layout.addWidget(self.export_btn_4320)
+        button_layout.addStretch()
         
-        self.main_layout.addLayout(control_layout)
-    
-    def create_image_display(self):
-        """创建图片显示区域"""
-        image_layout = QHBoxLayout()
+        control_layout.addWidget(button_panel)
         
-        # 原始图片预览
-        self.original_image_label = QLabel()
-        self.original_image_label.setAlignment(Qt.AlignCenter)
-        self.original_image_label.setStyleSheet("border: 2px solid gray;")
-        self.original_image_label.setFixedSize(500, 500)
-        image_layout.addWidget(self.original_image_label)
-        
-        # 处理后的图片预览
-        self.processed_image_label = QLabel()
-        self.processed_image_label.setAlignment(Qt.AlignCenter)
-        self.processed_image_label.setStyleSheet("border: 2px solid gray;")
-        self.processed_image_label.setFixedSize(500, 500)
-        image_layout.addWidget(self.processed_image_label)
-        
-        self.main_layout.addLayout(image_layout)
-    
-    def create_info_labels(self):
-        """创建信息显示标签"""
-        info_layout = QVBoxLayout()
-        
-        # 原始图片信息
-        self.original_info_label = QLabel("原始图片: 未加载")
-        info_layout.addWidget(self.original_info_label)
-        
-        # 处理后图片信息
-        self.processed_info_label = QLabel("处理后图片: 无")
-        info_layout.addWidget(self.processed_info_label)
-        
-        # 处理信息
-        self.process_info_label = QLabel("")
-        info_layout.addWidget(self.process_info_label)
-        
-        self.main_layout.addLayout(info_layout)
-    
-    def update_ui_state(self):
-        """根据当前状态更新UI元素"""
-        has_image = self.original_image is not None
-        self.export_btn.setEnabled(has_image)
-        self.resolution_slider.setEnabled(has_image)
+        main_layout.addWidget(control_panel)
     
     def import_image(self):
-        """导入图片"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self, "选择图片", "", "图片文件 (*.png *.jpg *.jpeg *.bmp)"
-        )
-        
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        file_path, _ = QFileDialog.getOpenFileName(self, "选择图片", script_dir, "图片文件 (*.png *.jpg *.jpeg *.bmp)")
         if file_path:
+            self.image_path = file_path
             try:
-                # 使用Pillow打开图片
-                self.original_image = Image.open(file_path)
-                
-                # 显示原始图片
-                self.display_original_image()
-                
-                # 处理图片
-                self.process_image()
-                
-                # 更新UI状态
-                self.update_ui_state()
-                
-                # 更新原始图片信息
+                self.original_image = Image.open(file_path).convert("RGB")
                 width, height = self.original_image.size
-                self.original_info_label.setText(
-                    f"原始图片: {width}×{height} ({file_path.split('/')[-1]})"
-                )
-                
+                self.original_res_label.setText(f"原图分辨率: {width}×{height}")
+                self.process_info_label.setText("处理流程: 已导入原图")
+                self.display_original_image()
+                self.update_image()
+                # 启用所有导出按钮
+                self.export_btn_1080.setEnabled(True)
+                self.export_btn_2160.setEnabled(True)
+                self.export_btn_3240.setEnabled(True)
+                self.export_btn_4320.setEnabled(True)
             except Exception as e:
-                QMessageBox.critical(self, "错误", f"无法加载图片: {str(e)}")
-    
-    def export_image(self):
-        """导出处理后的图片"""
-        if self.processed_image is None:
-            return
-            
-        file_path, _ = QFileDialog.getSaveFileName(
-            self, "保存图片", "", "PNG图片 (*.png);;JPEG图片 (*.jpg *.jpeg)"
-        )
-        
-        if file_path:
-            try:
-                self.processed_image.save(file_path)
-                QMessageBox.information(self, "成功", "图片已成功导出!")
-            except Exception as e:
-                QMessageBox.critical(self, "错误", f"无法保存图片: {str(e)}")
-    
-    def update_resolution(self, value):
-        """更新分辨率设置并重新处理图片"""
-        self.current_resolution = value
-        self.resolution_label.setText(str(value))
-        
-        if self.original_image is not None:
-            self.process_image()
+                print(f"加载图片失败: {e}")
     
     def display_original_image(self):
-        """显示原始图片"""
-        if self.original_image is None:
-            return
-            
-        # 将Pillow图像转换为QPixmap
-        qimage = self.pillow_to_qimage(self.original_image)
-        pixmap = QPixmap.fromImage(qimage)
-        
-        # 缩放以适应预览框，保持宽高比
-        scaled_pixmap = pixmap.scaled(
-            self.original_image_label.width() - 10,
-            self.original_image_label.height() - 10,
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation
-        )
-        
-        self.original_image_label.setPixmap(scaled_pixmap)
+        if self.original_image:
+            qimage = QImage(self.original_image.tobytes(), 
+                          self.original_image.width, 
+                          self.original_image.height, 
+                          self.original_image.width * 3, 
+                          QImage.Format_RGB888)
+            pixmap = QPixmap.fromImage(qimage)
+            scaled_pixmap = pixmap.scaled(self.original_preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            self.original_preview.setPixmap(scaled_pixmap)
     
-    def display_processed_image(self):
-        """显示处理后的图片"""
-        if self.processed_image is None:
+    def update_image(self):
+        if not self.original_image:
             return
             
-        # 将Pillow图像转换为QPixmap
-        qimage = self.pillow_to_qimage(self.processed_image)
-        pixmap = QPixmap.fromImage(qimage)
+        downscale_width = self.width_slider.value()
+        original_width, original_height = self.original_image.size
+        downscale_height = int(original_height * (downscale_width / original_width))
         
-        # 缩放以适应预览框，保持宽高比
-        scaled_pixmap = pixmap.scaled(
-            self.processed_image_label.width() - 10,
-            self.processed_image_label.height() - 10,
-            Qt.KeepAspectRatio,
-            Qt.SmoothTransformation
-        )
-        
-        self.processed_image_label.setPixmap(scaled_pixmap)
-        
-        # 更新处理后图片信息
-        width, height = self.processed_image.size
-        self.processed_info_label.setText(
-            f"处理后图片: {width}×{height} (降低到{self.current_resolution}px后放大到1080×1080)"
-        )
-    
-    def process_image(self):
-        if self.original_image is None:
-            return
-            
         try:
-            # 计算新的尺寸，保持宽高比
-            original_width, original_height = self.original_image.size
-            aspect_ratio = original_width / original_height
+            downscaled_img = self.original_image.resize((downscale_width, downscale_height), Image.NEAREST)
+            self.modified_image = downscaled_img
             
-            if original_width > original_height:
-                new_width = self.current_resolution
-                new_height = int(new_width / aspect_ratio)
-            else:
-                new_height = self.current_resolution
-                new_width = int(new_height * aspect_ratio)
+            qimage = QImage(downscaled_img.tobytes(), 
+                          downscaled_img.width, 
+                          downscaled_img.height, 
+                          downscaled_img.width * 3, 
+                          QImage.Format_RGB888)
+            pixmap = QPixmap.fromImage(qimage)
             
-            # 降低分辨率
-            resized_img = self.original_image.resize(
-                (new_width, new_height),
-                Image.Resampling.NEAREST
+            scaled_pixmap = pixmap.scaled(
+                self.modified_preview.size(), 
+                Qt.KeepAspectRatio, 
+                Qt.FastTransformation
             )
+            self.modified_preview.setPixmap(scaled_pixmap)
             
-            # 放大到1080×1080
-            final_width, final_height = 1080, 1080
-            if aspect_ratio > 1:  # 宽大于高
-                final_height = int(final_width / aspect_ratio)
-            else:  # 高大于宽
-                final_width = int(final_height * aspect_ratio)
-            
-            self.processed_image = resized_img.resize(
-                (final_width, final_height),
-                Image.Resampling.NEAREST
-            )
-            
-            # 显示处理后的图片
-            self.display_processed_image()
-            
-            # 更新处理信息
-            self.process_info_label.setText(
-                f"处理过程: {original_width}×{original_height} → "
-                f"{new_width}×{new_height} → "
-                f"{final_width}×{final_height}"
-            )
+            process_text = f"处理流程: {original_width}×{original_height} → {downscale_width}×{downscale_height}"
+            self.process_info_label.setText(process_text)
             
         except Exception as e:
-            QMessageBox.critical(self, "错误", f"图片处理失败: {str(e)}")
+            print(f"处理图片失败: {e}")
     
-    def pillow_to_qimage(self, pil_image):
-        """将Pillow图像转换为QImage（修复颜色问题）"""
-        # 转换为RGB模式（如果是RGBA，会丢弃alpha通道）
-        if pil_image.mode == 'RGBA':
-            pil_image = pil_image.convert('RGB')
-        elif pil_image.mode != 'RGB':
-            pil_image = pil_image.convert('RGB')
+    def export_image(self, target_width):
+        if not self.modified_image:
+            return
+            
+        # 计算目标高度（保持宽高比）
+        original_width, original_height = self.original_image.size
+        downscale_width = self.width_slider.value()
+        downscale_height = int(original_height * (downscale_width / original_width))
+        target_height = int(downscale_height * (target_width / downscale_width))
         
-        # 获取图像数据
-        data = pil_image.tobytes('raw', 'RGB')
+        # 使用NEAREST插值放大到目标尺寸
+        upscaled_img = self.modified_image.resize((target_width, target_height), Image.NEAREST)
         
-        # 创建QImage
-        qimage = QImage(data, pil_image.size[0], pil_image.size[1], QImage.Format_RGB888)
+        # 生成默认文件名：原文件名_分辨率.扩展名
+        base_name = os.path.splitext(os.path.basename(self.image_path))[0]
+        ext = os.path.splitext(self.image_path)[1]
+        default_name = f"{base_name}_{target_width}x{target_height}{ext}"
         
-        # 确保数据在QImage生命周期内保持有效
-        qimage.data = data
+        file_path, _ = QFileDialog.getSaveFileName(
+            self, 
+            f"保存图片 ({target_width}×{target_height})", 
+            default_name,  # 设置默认文件名
+            "PNG图片 (*.png);;JPEG图片 (*.jpg *.jpeg)"
+        )
         
-        return qimage
+        if file_path:
+            try:
+                upscaled_img.save(file_path)
+                self.process_info_label.setText(
+                    f"{self.process_info_label.text()} → 已导出 {target_width}×{target_height}"
+                )
+            except Exception as e:
+                print(f"保存图片失败: {e}")
+    
+    def resizeEvent(self, event):
+        if self.original_image:
+            self.display_original_image()
+            self.update_image()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
-    window = ImageProcessorApp()
+    window = ImageResizerApp()
     window.show()
     sys.exit(app.exec_())
