@@ -234,7 +234,7 @@ class ImageResizerApp(QMainWindow):
                           self.original_image.width * 3, 
                           QImage.Format_RGB888)
             pixmap = QPixmap.fromImage(qimage)
-            scaled_pixmap = pixmap.scaled(self.original_preview.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            scaled_pixmap = pixmap.scaled(self.original_preview.size(), Qt.KeepAspectRatio)
             self.original_preview.setPixmap(scaled_pixmap)
     
     def update_image(self):
@@ -296,7 +296,11 @@ class ImageResizerApp(QMainWindow):
         
         if file_path:
             try:
-                upscaled_img.save(file_path)
+                # 修复导出的图片质量问题，强制最高质量
+                if file_path.lower().endswith(('.png')):
+                    upscaled_img.save(file_path, 'PNG', compress_level=0)  # 无压缩
+                elif file_path.lower().endswith(('.jpg', '.jpeg')):
+                    upscaled_img.save(file_path, 'JPEG', quality=100, subsampling=0)
                 self.process_info_label.setText(
                     f"{self.process_info_label.text()} → 已导出 {target_width}×{target_height}"
                 )
