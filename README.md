@@ -18,4 +18,4 @@
 ![图片](https://github.com/user-attachments/assets/e75b06e4-3d01-472a-8c16-5addce30fe7f)
 
 制作抽象的像素风
-![2eea43d3906598637914fd864669d0f](https://github.com/user-attachments/assets/5cb2805b-af27-403d-a400-492c681ccf34)
+![图片](https://github.com/user-attachments/assets/8da5fbd7-6665-48d3-acae-9e4713e5c8c3)
